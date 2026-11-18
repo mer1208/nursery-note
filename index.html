@@ -9,19 +9,23 @@
 </head>
 <body class="bg-slate-50 text-slate-800 pb-12">
 
-    <!-- 🔒 ログイン画面（初期状態では表示） -->
+    <!-- 🔒 ログイン画面（データベース認証版） -->
     <div id="login-screen" class="max-w-md mx-auto p-6 mt-12 bg-white rounded-2xl shadow-sm">
         <div class="text-center mb-6">
             <h1 class="text-xl font-bold text-indigo-600">🧸 ほいくノート</h1>
-            <p class="text-xs text-slate-500 mt-1">閲覧・利用にはパスワードが必要です</p>
+            <p class="text-xs text-slate-500 mt-1">ログインIDとパスワードを入力してください</p>
         </div>
         <form id="login-form" class="space-y-4">
             <div>
-                <label class="block text-xs font-bold text-slate-600 mb-1">合言葉（パスワード）</label>
+                <label class="block text-xs font-bold text-slate-600 mb-1">ユーザーID</label>
+                <input type="text" id="username-input" placeholder="例: papa" class="w-full border rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" required>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-600 mb-1">パスワード</label>
                 <input type="password" id="password-input" placeholder="パスワードを入力" class="w-full border rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" required>
             </div>
-            <button type="submit" class="w-full bg-indigo-600 text-white font-bold py-2.5 rounded-lg text-sm shadow">ログインする</button>
-            <p id="login-error" class="text-rose-500 text-xs text-center hidden">パスワードが違います</p>
+            <button type="submit" id="login-btn" class="w-full bg-indigo-600 text-white font-bold py-2.5 rounded-lg text-sm shadow">ログインする</button>
+            <p id="login-error" class="text-rose-500 text-xs text-center hidden">IDまたはパスワードが違います</p>
         </form>
     </div>
 
@@ -67,26 +71,39 @@
         const SUPABASE_ANON_KEY = "sb_publishable_5dmK9oGLbvB_Zck-MuGwNA_fwH58LOc";
         const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // 🔐 設定するパスワード（ここで自由に変更できます）
-        const CORRECT_PASSWORD = "banana222"; 
-
-        // 起動時にすでにログイン済み（セッション保持）かチェック
+        // 起動時にすでにログイン済みかチェック
         if (sessionStorage.getItem("nursery_auth") === "true") {
             showApp();
         }
 
-        // ログインフォーム送信時の処理
-        document.getElementById('login-form').addEventListener('submit', (e) => {
+        // ログインフォーム送信時の処理（Supabaseの users テーブルと照合）
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const inputVal = document.getElementById('password-input').value;
+            const inputUser = document.getElementById('username-input').value.trim();
+            const inputPass = document.getElementById('password-input').value.trim();
             const errorMsg = document.getElementById('login-error');
+            const loginBtn = document.getElementById('login-btn');
 
-            if (inputVal === CORRECT_PASSWORD) {
-                // 認証成功：ブラウザのセッションに記憶し、アプリ画面を表示
+            loginBtn.textContent = "認証中...";
+            loginBtn.disabled = true;
+
+            // Supabaseの users テーブルから一致するユーザーを検索
+            const { data, error } = await client
+                .from('users')
+                .select('*')
+                .eq('username', inputUser)
+                .eq('password', inputPass)
+                .single();
+
+            loginBtn.textContent = "ログインする";
+            loginBtn.disabled = false;
+
+            if (data && !error) {
+                // 認証成功
                 sessionStorage.setItem("nursery_auth", "true");
                 showApp();
             } else {
-                // 認証失敗：エラーメッセージを表示
+                // 認証失敗
                 errorMsg.classList.remove('hidden');
             }
         });
@@ -94,8 +111,6 @@
         function showApp() {
             document.getElementById('login-screen').classList.add('hidden');
             document.getElementById('app-screen').classList.remove('hidden');
-            
-            // アプリ表示後にデータを読み込む
             document.getElementById('memo-date').valueAsDate = new Date();
             fetchStock();
             fetchMemos();
@@ -138,13 +153,11 @@
 
         window.updateCount = async function(id, newCount) {
             if (newCount < 0) return;
-
             const target = stockData.find(item => item.id === id);
             if (target) {
                 target.current_count = newCount;
                 renderStock();
             }
-
             await client.from('nursery_stock').update({ current_count: newCount }).eq('id', id);
         }
 
