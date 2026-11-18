@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ほいくノート（リアルタイム共有）</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 pb-12">
+    <div class="max-w-md mx-auto p-4">
+        <header class="mb-6 text-center">
+            <h1 class="text-xl font-bold text-indigo-600">🧸 ほいくノート</h1>
+            <p class="text-xs text-slate-500">パパ・ママリアルタイム共有</p>
+        </header>
+
+        <!-- 着替えストックセクション -->
+        <section class="bg-white rounded-2xl p-4 shadow-sm mb-6">
+            <h2 class="font-bold text-sm text-slate-700 mb-3 flex items-center justify-between">
+                <span>👕 ロッカーの着替え状況</span>
+                <span id="sync-status" class="text-xs text-emerald-500 font-normal">● 同期中</span>
+            </h2>
+            <div id="stock-list" class="space-y-3">
+                <!-- JavaScriptで動的生成 -->
+            </div>
+        </section>
+
+        <!-- 連絡メモセクション -->
+        <section class="bg-white rounded-2xl p-4 shadow-sm">
+            <h2 class="font-bold text-sm text-slate-700 mb-3">📝 昨日のこと・連絡メモ</h2>
+            <form id="memo-form" class="space-y-3">
+                <input type="date" id="memo-date" class="w-full border rounded-lg p-2 text-sm" required>
+                <select id="memo-condition" class="w-full border rounded-lg p-2 text-sm">
+                    <option value="🌟 元気いっぱい">🌟 元気いっぱい</option>
+                    <option value="💧 鼻水・咳少しあり">💧 鼻水・咳少しあり</option>
+                    <option value="⚡ 少し機嫌斜め・発熱気味">⚡ 少し機嫌斜め・発熱気味</option>
+                </select>
+                <textarea id="memo-text" placeholder="昨日の夕食、睡眠、先生に伝えることなど..." rows="3" class="w-full border rounded-lg p-2 text-sm"></textarea>
+                <button type="submit" class="w-full bg-indigo-600 text-white font-bold py-2 rounded-lg text-sm shadow">メモを保存する</button>
+            </form>
+            <div id="memo-history" class="mt-4 space-y-2 border-t pt-3">
+                <!-- 履歴 -->
+            </div>
+        </section>
+    </div>
+
+    <script>
+        const SUPABASE_URL = "https://xpqlgbqosjyvvdxausjo.supabase.co";
+        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwcWxnYnFvc2p5dnZkeGF1c2pvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ5NTgzNDQsImV4cCI6MjExMDUzNDM0NH0.Ob_wA120NGAtf4nUq9fNr5O1E6OcUnuGq1GjBVlgdR4";
+        const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // 今日をデフォルトセット
+        document.getElementById('memo-date').valueAsDate = new Date();
+
+        async function fetchStock() {
+            const { data } = await client.from('nursery_stock').select('*').order('id');
+            const container = document.getElementById('stock-list');
+            container.innerHTML = '';
+            data.forEach(item => {
+                const isShort = item.current_count < item.max_count;
+                const div = document.createElement('div');
+                div.className = `flex items-center justify-between p-2 rounded-xl border ${isShort ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-100'}`;
+                div.innerHTML = `
+                    <div>
+                        <span class="font-bold text-sm">${item.item_name}</span>
+                        <span class="text-xs ml-2 ${isShort ? 'text-rose-600 font-bold' : 'text-slate-500'}">
+                            ${isShort ? `🚨 要補充 (あと${item.max_count - item.current_count}枚)` : '✅ 十分'}
+                        </span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="updateCount('${item.id}', ${item.current_count - 1})" class="w-8 h-8 bg-white border rounded-lg font-bold shadow-sm">-</button>
+                        <span class="w-6 text-center font-bold">${item.current_count}</span>
+                        <button onclick="updateCount('${item.id}', ${item.current_count + 1})" class="w-8 h-8 bg-white border rounded-lg font-bold shadow-sm">+</button>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        window.updateCount = async function(id, newCount) {
+            if (newCount < 0) return;
+            await client.from('nursery_stock').update({ current_count: newCount }).eq('id', id);
+        }
+
+        // リアルタイムリスナーの登録
+        client.channel('public:nursery_stock')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'nursery_stock' }, payload => {
+                fetchStock();
+            })
+            .subscribe();
+
+        // メモ保存
+        document.getElementById('memo-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const date = document.getElementById('memo-date').value;
+            const condition = document.getElementById('memo-condition').value;
+            const memo = document.getElementById('memo-text').value;
+
+            await client.from('nursery_logs').insert([{ date, condition, memo }]);
+            document.getElementById('memo-text').value = '';
+            fetchMemos();
+        });
+
+        async function fetchMemos() {
+            const { data } = await client.from('nursery_logs').select('*').order('date', { ascending: false }).limit(5);
+            const history = document.getElementById('memo-history');
+            history.innerHTML = '<h3 class="text-xs font-bold text-slate-500 mb-2">直近の記録</h3>';
+            data.forEach(log => {
+                const box = document.createElement('div');
+                box.className = 'bg-slate-50 p-2 rounded-lg text-xs space-y-1';
+                box.innerHTML = `<div class="font-bold text-indigo-600">${log.date} - ${log.condition}</div><div class="text-slate-600">${log.memo || '特記事項なし'}</div>`;
+                history.appendChild(box);
+            });
+        }
+
+        client.channel('public:nursery_logs')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'nursery_logs' }, payload => {
+                fetchMemos();
+            })
+            .subscribe();
+
+        fetchStock();
+        fetchMemos();
+    </script>
+</body>
+</html>
