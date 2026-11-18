@@ -8,7 +8,25 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body class="bg-slate-50 text-slate-800 pb-12">
-    <div class="max-w-md mx-auto p-4">
+
+    <!-- 🔒 ログイン画面（初期状態では表示） -->
+    <div id="login-screen" class="max-w-md mx-auto p-6 mt-12 bg-white rounded-2xl shadow-sm">
+        <div class="text-center mb-6">
+            <h1 class="text-xl font-bold text-indigo-600">🧸 ほいくノート</h1>
+            <p class="text-xs text-slate-500 mt-1">閲覧・利用にはパスワードが必要です</p>
+        </div>
+        <form id="login-form" class="space-y-4">
+            <div>
+                <label class="block text-xs font-bold text-slate-600 mb-1">合言葉（パスワード）</label>
+                <input type="password" id="password-input" placeholder="パスワードを入力" class="w-full border rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" required>
+            </div>
+            <button type="submit" class="w-full bg-indigo-600 text-white font-bold py-2.5 rounded-lg text-sm shadow">ログインする</button>
+            <p id="login-error" class="text-rose-500 text-xs text-center hidden">パスワードが違います</p>
+        </form>
+    </div>
+
+    <!-- 🧸 メインアプリ画面（初期状態では非表示） -->
+    <div id="app-screen" class="max-w-md mx-auto p-4 hidden">
         <header class="mb-6 text-center">
             <h1 class="text-xl font-bold text-indigo-600">🧸 ほいくノート</h1>
             <p class="text-xs text-slate-500">パパ・ママリアルタイム共有</p>
@@ -21,7 +39,7 @@
                 <span id="sync-status" class="text-xs text-emerald-500 font-normal">● 同期中</span>
             </h2>
             <div id="stock-list" class="space-y-3">
-                <!-- JavaScriptで動적生成 -->
+                <!-- JavaScriptで動的生成 -->
             </div>
         </section>
 
@@ -49,11 +67,41 @@
         const SUPABASE_ANON_KEY = "sb_publishable_5dmK9oGLbvB_Zck-MuGwNA_fwH58LOc";
         const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // ローカルにデータを保持して高速化するための変数
-        let stockData = [];
+        // 🔐 設定するパスワード（ここで自由に変更できます）
+        const CORRECT_PASSWORD = "1234"; 
 
-        // 今日をデフォルトセット
-        document.getElementById('memo-date').valueAsDate = new Date();
+        // 起動時にすでにログイン済み（セッション保持）かチェック
+        if (sessionStorage.getItem("nursery_auth") === "true") {
+            showApp();
+        }
+
+        // ログインフォーム送信時の処理
+        document.getElementById('login-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const inputVal = document.getElementById('password-input').value;
+            const errorMsg = document.getElementById('login-error');
+
+            if (inputVal === CORRECT_PASSWORD) {
+                // 認証成功：ブラウザのセッションに記憶し、アプリ画面を表示
+                sessionStorage.setItem("nursery_auth", "true");
+                showApp();
+            } else {
+                // 認証失敗：エラーメッセージを表示
+                errorMsg.classList.remove('hidden');
+            }
+        });
+
+        function showApp() {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('app-screen').classList.remove('hidden');
+            
+            // アプリ表示後にデータを読み込む
+            document.getElementById('memo-date').valueAsDate = new Date();
+            fetchStock();
+            fetchMemos();
+        }
+
+        let stockData = [];
 
         async function fetchStock() {
             const { data } = await client.from('nursery_stock').select('*').order('created_at', { ascending: true });
@@ -63,7 +111,6 @@
             }
         }
 
-        // 画面を描画する関数
         function renderStock() {
             const container = document.getElementById('stock-list');
             container.innerHTML = '';
@@ -89,30 +136,24 @@
             });
         }
 
-        // 💡 ボタンを押した瞬間画面を更新し、通信を裏で行うことで爆速化
         window.updateCount = async function(id, newCount) {
             if (newCount < 0) return;
 
-            // 1. ローカルのデータを即座に変更して再描画（待ち時間ゼロ）
             const target = stockData.find(item => item.id === id);
             if (target) {
                 target.current_count = newCount;
                 renderStock();
             }
 
-            // 2. データベースの更新をバックグラウンドで実行
             await client.from('nursery_stock').update({ current_count: newCount }).eq('id', id);
         }
 
-        // リアルタイムリスナーの登録（他の人が変えたとき用）
         client.channel('public:nursery_stock')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'nursery_stock' }, payload => {
-                // 自分が操作した瞬間の競合を防ぐため、サーバーの最新データを取得
                 fetchStock();
             })
             .subscribe();
 
-        // メモ保存
         document.getElementById('memo-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const date = document.getElementById('memo-date').value;
@@ -144,9 +185,6 @@
                 fetchMemos();
             })
             .subscribe();
-
-        fetchStock();
-        fetchMemos();
     </script>
 </body>
 </html>
