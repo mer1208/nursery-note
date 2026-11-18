@@ -21,7 +21,7 @@
                 <span id="sync-status" class="text-xs text-emerald-500 font-normal">● 同期中</span>
             </h2>
             <div id="stock-list" class="space-y-3">
-                <!-- JavaScriptで動的生成 -->
+                <!-- JavaScriptで動적生成 -->
             </div>
         </section>
 
@@ -49,18 +49,26 @@
         const SUPABASE_ANON_KEY = "sb_publishable_5dmK9oGLbvB_Zck-MuGwNA_fwH58LOc";
         const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        // ローカルにデータを保持して高速化するための変数
+        let stockData = [];
+
         // 今日をデフォルトセット
         document.getElementById('memo-date').valueAsDate = new Date();
 
         async function fetchStock() {
-            // 💡 created_at の昇順（古い順）に固定して取得
             const { data } = await client.from('nursery_stock').select('*').order('created_at', { ascending: true });
+            if (data) {
+                stockData = data;
+                renderStock();
+            }
+        }
+
+        // 画面を描画する関数
+        function renderStock() {
             const container = document.getElementById('stock-list');
             container.innerHTML = '';
             
-            if (!data) return;
-
-            data.forEach(item => {
+            stockData.forEach(item => {
                 const isShort = item.current_count < item.max_count;
                 const div = document.createElement('div');
                 div.className = `flex items-center justify-between p-2 rounded-xl border ${isShort ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-100'}`;
@@ -72,23 +80,34 @@
                         </span>
                     </div>
                     <div class="flex items-center space-x-2">
-                        <button onclick="updateCount('${item.id}', ${item.current_count - 1})" class="w-8 h-8 bg-white border rounded-lg font-bold shadow-sm">-</button>
+                        <button onclick="updateCount('${item.id}', ${item.current_count - 1})" class="w-8 h-8 bg-white border rounded-lg font-bold shadow-sm active:bg-slate-100">-</button>
                         <span class="w-6 text-center font-bold">${item.current_count}</span>
-                        <button onclick="updateCount('${item.id}', ${item.current_count + 1})" class="w-8 h-8 bg-white border rounded-lg font-bold shadow-sm">+</button>
+                        <button onclick="updateCount('${item.id}', ${item.current_count + 1})" class="w-8 h-8 bg-white border rounded-lg font-bold shadow-sm active:bg-slate-100">+</button>
                     </div>
                 `;
                 container.appendChild(div);
             });
         }
 
+        // 💡 ボタンを押した瞬間画面を更新し、通信を裏で行うことで爆速化
         window.updateCount = async function(id, newCount) {
             if (newCount < 0) return;
+
+            // 1. ローカルのデータを即座に変更して再描画（待ち時間ゼロ）
+            const target = stockData.find(item => item.id === id);
+            if (target) {
+                target.current_count = newCount;
+                renderStock();
+            }
+
+            // 2. データベースの更新をバックグラウンドで実行
             await client.from('nursery_stock').update({ current_count: newCount }).eq('id', id);
         }
 
-        // リアルタイムリスナーの登録
+        // リアルタイムリスナーの登録（他の人が変えたとき用）
         client.channel('public:nursery_stock')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'nursery_stock' }, payload => {
+                // 自分が操作した瞬間の競合を防ぐため、サーバーの最新データを取得
                 fetchStock();
             })
             .subscribe();
