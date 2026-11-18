@@ -43,8 +43,7 @@
             </div>
         </section>
     </div>
-
-    <script>
+<script>
         const SUPABASE_URL = "https://xpqlgbqosjyvvdxausjo.supabase.co";
         const SUPABASE_ANON_KEY = "sb_publishable_5dmK9oGLbvB_Zck-MuGwNA_fwH58LOc";
         const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -53,7 +52,8 @@
         document.getElementById('memo-date').valueAsDate = new Date();
 
         async function fetchStock() {
-            const { data } = await client.from('nursery_stock').select('*').order('id');
+            // 💡【修正1】id順 または created_atの昇順（古い順）に並び替え
+            const { data } = await client.from('nursery_stock').select('*').order('created_at', { ascending: true });
             const container = document.getElementById('stock-list');
             container.innerHTML = '';
             data.forEach(item => {
@@ -102,7 +102,8 @@
         });
 
         async function fetchMemos() {
-            const { data } = await client.from('nursery_logs').select('*').order('date', { ascending: false }).limit(5);
+            // 💡【修正2】日付（date）に加えて created_at の降順（新しい順）にして、最新のものが上に来るようにする
+            const { data } = await client.from('nursery_logs').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }).limit(5);
             const history = document.getElementById('memo-history');
             history.innerHTML = '<h3 class="text-xs font-bold text-slate-500 mb-2">直近の記録</h3>';
             data.forEach(log => {
